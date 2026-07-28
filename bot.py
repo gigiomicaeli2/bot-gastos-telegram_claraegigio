@@ -1,4 +1,3 @@
-import os
 import re
 import sqlite3
 from datetime import datetime
@@ -11,13 +10,10 @@ from telegram.ext import (
     filters,
 )
 
-# Aplica a correção para rodar sem conflito
-
 # Configuração do Banco de Dados SQLite local
 conn = sqlite3.connect("gastos.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Atualiza a tabela para salvar também o ID da mensagem enviada pelo bot
 cursor.execute(
     """
 CREATE TABLE IF NOT EXISTS gastos (
@@ -34,7 +30,6 @@ CREATE TABLE IF NOT EXISTS gastos (
 conn.commit()
 
 
-# Função para extrair valor e descrição da mensagem
 def extrair_gasto(texto):
     match = re.search(r"(\d+[\.,]?\d*)", texto)
     if not match:
@@ -51,7 +46,6 @@ def extrair_gasto(texto):
     return descricao if descricao else "Gasto geral", valor
 
 
-# Processa as mensagens de gastos enviadas no grupo
 async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -66,7 +60,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         hoje = datetime.now().strftime("%Y-%m-%d")
         mes_atual = datetime.now().strftime("%Y-%m")
 
-        # Envia a resposta e captura o ID da mensagem do bot
         cursor.execute(
             "SELECT SUM(valor) FROM gastos WHERE user_id = ? AND data LIKE ?",
             (user_id, f"{mes_atual}%"),
@@ -82,7 +75,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         msg_enviada = await update.message.reply_text(resposta_texto)
 
-        # Salva no banco incluindo o ID da mensagem gerada pelo bot
         cursor.execute(
             "INSERT INTO gastos (user_id, user_name, descricao, valor, data, message_id) VALUES (?, ?, ?, ?, ?, ?)",
             (
@@ -97,20 +89,16 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.commit()
 
 
-# Comando para desfazer
 async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
 
-    # Verifica se o usuário usou o recurso de "Responder" a uma mensagem do bot
     if (
         update.message.reply_to_message
-        and update.message.reply_to_message.from_user.id
-        == context.bot.id
+        and update.message.reply_to_message.from_user.id == context.bot.id
     ):
         msg_respondida_id = update.message.reply_to_message.message_id
 
-        # Procura o gasto associado àquela mensagem exata do bot
         cursor.execute(
             "SELECT id, descricao, valor FROM gastos WHERE message_id = ? AND user_id = ?",
             (msg_respondida_id, user_id),
@@ -122,17 +110,10 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("DELETE FROM gastos WHERE id = ?", (gasto_id,))
             conn.commit()
             await update.message.reply_text(
-                f"🗑️ Gasto apagado com sucesso!\n"
-                f"❌ Removido: {descricao} (R$ {valor:.2f})"
-            )
-            return
-        else:
-            await update.message.reply_text(
-                "Não encontrei nenhum registro de gasto vinculado a esta mensagem específica."
+                f"🗑️ Gasto apagado com sucesso!\n❌ Removido: {descricao} (R$ {valor:.2f})"
             )
             return
 
-    # Comportamento padrão: apaga o último
     cursor.execute(
         "SELECT id, descricao, valor FROM gastos WHERE user_id = ? ORDER BY id DESC LIMIT 1",
         (user_id,),
@@ -150,12 +131,10 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     await update.message.reply_text(
-        f"🗑️ Último gasto apagado com sucesso!\n"
-        f"❌ Removido: {descricao} (R$ {valor:.2f})"
+        f"🗑️ Último gasto apagado com sucesso!\n❌ Removido: {descricao} (R$ {valor:.2f})"
     )
 
 
-# Relatório do dia
 async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime("%Y-%m-%d")
     cursor.execute(
@@ -165,9 +144,7 @@ async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     resultados = cursor.fetchall()
 
     if not resultados:
-        await update.message.reply_text(
-            "Nenhum gasto registrado hoje até o momento."
-        )
+        await update.message.reply_text("Nenhum gasto registrado hoje até o momento.")
         return
 
     texto = f"🌙 **Fechamento do Dia ({datetime.now().strftime('%d/%m/%Y')}):**\n"
@@ -180,7 +157,6 @@ async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 
-# Relatório do mês
 async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mes_atual = datetime.now().strftime("%Y-%m")
     cursor.execute(
@@ -204,12 +180,7 @@ async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    TOKEN = os.getenv("BOT_TOKEN")
-
-    if not TOKEN:
-        raise RuntimeError(
-            "A variável de ambiente BOT_TOKEN não foi encontrada."
-        )
+    TOKEN = "SEU_TOKEN_AQUI"
 
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -220,8 +191,9 @@ def main():
     app.add_handler(CommandHandler("mes", relatorio_mes))
     app.add_handler(CommandHandler("desfazer", desfazer_gasto))
 
-    print("Bot rodando...")
+    print("Bot rodando no Render...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
