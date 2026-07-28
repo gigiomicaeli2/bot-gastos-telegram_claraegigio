@@ -225,5 +225,23 @@ def main():
     app.run_polling()
 
 
+# --- TRUQUE PARA ENGANAR O RENDER ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot esta rodando!")
+
+def keep_alive():
+    # O Render exige que usemos a porta que ele fornece, ou a 8080 como padrão
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+# ------------------------------------
+
 if __name__ == "__main__":
+    # 1. Ligando o site falso em segundo plano (isso satisfaz o Render)
+    threading.Thread(target=keep_alive, daemon=True).start()
+    
+    # 2. Ligando o seu bot de verdade
     main()
