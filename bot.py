@@ -1,7 +1,6 @@
 import re
 import sqlite3
 from datetime import datetime
-import nest_asyncio
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,7 +11,6 @@ from telegram.ext import (
 )
 
 # Aplica a correção para rodar sem conflito
-nest_asyncio.apply()
 
 # Configuração do Banco de Dados SQLite local
 conn = sqlite3.connect("gastos.db", check_same_thread=False)
