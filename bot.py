@@ -1,3 +1,4 @@
+import os
 import re
 import sqlite3
 from datetime import datetime
@@ -203,7 +204,12 @@ async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    TOKEN = "8749873142:AAHra0Uxo3j_mg1pxqXfufCy2NrjBC6kKxA"
+    TOKEN = os.getenv("BOT_TOKEN")
+
+    if not TOKEN:
+        raise RuntimeError(
+            "A variável de ambiente BOT_TOKEN não foi encontrada."
+        )
 
     app = ApplicationBuilder().token(TOKEN).build()
 
