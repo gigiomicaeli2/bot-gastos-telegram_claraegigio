@@ -205,7 +205,7 @@ async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    TOKEN = "8749873142:AAFKUc4l0WNP1lLKfHbi8f19z-USTYFIek8"
+    TOKEN = "8749873142:AAHra0Uxo3j_mg1pxqXfufCy2NrjBC6kKxA"
 
     app = ApplicationBuilder().token(TOKEN).build()
 
