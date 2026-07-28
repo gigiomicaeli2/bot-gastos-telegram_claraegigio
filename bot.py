@@ -1,7 +1,3 @@
-import os
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
 import re
 import sqlite3
 from datetime import datetime
@@ -15,7 +11,7 @@ from telegram.ext import (
     filters,
 )
 
-# Aplica a correção para o Google Colab rodar sem conflito
+# Aplica a correção para rodar sem conflito
 nest_asyncio.apply()
 
 # Configuração do Banco de Dados SQLite local
@@ -72,7 +68,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         mes_atual = datetime.now().strftime("%Y-%m")
 
         # Envia a resposta e captura o ID da mensagem do bot
-        mes_atual_str = datetime.now().strftime("%Y-%m")
         cursor.execute(
             "SELECT SUM(valor) FROM gastos WHERE user_id = ? AND data LIKE ?",
             (user_id, f"{mes_atual}%"),
@@ -103,7 +98,7 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.commit()
 
 
-# Comando para desfazer (apoiando resposta à mensagem ou o último padrão)
+# Comando para desfazer
 async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
@@ -138,7 +133,7 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Comportamento padrão caso não responda nenhuma mensagem específica: apaga o último
+    # Comportamento padrão: apaga o último
     cursor.execute(
         "SELECT id, descricao, valor FROM gastos WHERE user_id = ? ORDER BY id DESC LIMIT 1",
         (user_id,),
@@ -161,7 +156,7 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# Relatório do dia (comando /dia)
+# Relatório do dia
 async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime("%Y-%m-%d")
     cursor.execute(
@@ -186,7 +181,7 @@ async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 
-# Relatório do mês (comando /mes)
+# Relatório do mês
 async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mes_atual = datetime.now().strftime("%Y-%m")
     cursor.execute(
@@ -221,27 +216,8 @@ def main():
     app.add_handler(CommandHandler("mes", relatorio_mes))
     app.add_handler(CommandHandler("desfazer", desfazer_gasto))
 
-    print("Bot rodando com desfazer via resposta...")
+    print("Bot rodando...")
     app.run_polling()
 
-
-# --- TRUQUE PARA ENGANAR O RENDER ---
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot esta rodando!")
-
-def keep_alive():
-    # O Render exige que usemos a porta que ele fornece, ou a 8080 como padrão
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    server.serve_forever()
-# ------------------------------------
-
 if __name__ == "__main__":
-    # 1. Ligando o site falso em segundo plano (isso satisfaz o Render)
-    threading.Thread(target=keep_alive, daemon=True).start()
-    
-    # 2. Ligando o seu bot de verdade
     main()
