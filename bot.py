@@ -61,7 +61,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/mes` - Ver gastos detalhados do mês atual por pessoa\n"
         "• `/mes MM/AAAA` - Ver gastos de um mês específico (ex: `/mes 07/2026`)\n"
         "• `/mesanterior` - Ver gastos do mês passado\n"
-        "• `/ano` - Ver o resumo de gastos mês a mês do ano atual\n"
+        "• `/ano` - Ver o resumo de gastos do ano atual\n"
+        "• `/ano AAAA` - Ver o resumo de um ano específico (ex: `/ano 2025`)\n"
         "• `/desfazer` - Responda a qualquer mensagem de gasto para apagá-lo (ou mande direto para apagar o último)"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
@@ -222,7 +223,6 @@ async def gerar_relatorio_mes_detalhado(user_id_solicitante, mes_alvo, titulo_me
 async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     
-    # Se enviou argumento como /mes 07/2026
     if context.args:
         try:
             mes_ano_input = context.args[0]
@@ -257,7 +257,15 @@ async def relatorio_mes_anterior(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ano_atual = datetime.now().strftime('%Y')
+    # Verifica se o usuário informou um ano específico (ex: /ano 2025)
+    if context.args:
+        ano_solicitado = context.args[0]
+        if not ano_solicitado.isdigit() or len(ano_solicitado) != 4:
+            await update.message.reply_text("⚠️ Formato de ano inválido! Use: `/ano AAAA` (ex: `/ano 2026`)", parse_mode='Markdown')
+            return
+        ano_alvo = ano_solicitado
+    else:
+        ano_alvo = datetime.now().strftime('%Y')
 
     cursor.execute('''
         SELECT strftime('%m', data) as mes, SUM(valor)
@@ -265,15 +273,15 @@ async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
         WHERE data LIKE ?
         GROUP BY mes
         ORDER BY mes ASC
-    ''', (f"{ano_atual}%",))
+    ''', (f"{ano_alvo}%",))
 
     resultados = cursor.fetchall()
 
     if not resultados:
-        await update.message.reply_text(f"📅 Nenhum gasto registrado no ano de {ano_atual}!")
+        await update.message.reply_text(f"📅 Nenhum gasto registrado no ano de {ano_alvo}!")
         return
 
-    mensagem = f"📅 **Gastos Acumulados por Mês ({ano_atual}):**\n\n"
+    mensagem = f"📅 **Gastos Acumulados por Mês ({ano_alvo}):**\n\n"
     total_ano = 0.0
 
     for mes_num, total_mes in resultados:
@@ -281,7 +289,7 @@ async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mensagem += f"• **{nome_mes}**: R$ {total_mes:.2f}\n"
         total_ano += total_mes
 
-    mensagem += f"\n💵 **Total Geral em {ano_atual}:** R$ {total_ano:.2f}"
+    mensagem += f"\n💵 **Total Geral em {ano_alvo}:** R$ {total_ano:.2f}"
 
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
@@ -298,7 +306,6 @@ def main():
     app.add_handler(CommandHandler("ano", relatorio_ano))
     app.add_handler(CommandHandler("desfazer", desfazer_gasto))
 
-    # O Handler de mensagem por texto fica por último
     app.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), processar_mensagem)
     )
