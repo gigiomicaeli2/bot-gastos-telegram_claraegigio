@@ -14,10 +14,12 @@ from telegram.ext import (
 conn = sqlite3.connect("gastos.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Cria a tabela com a nova coluna chat_id (se ainda não existir)
 cursor.execute(
     """
 CREATE TABLE IF NOT EXISTS gastos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT,
     user_id TEXT,
     user_name TEXT,
     descricao TEXT,
@@ -28,6 +30,13 @@ CREATE TABLE IF NOT EXISTS gastos (
 """
 )
 conn.commit()
+
+# Migração de banco: adiciona a coluna chat_id em bancos já existentes sem apagar dados
+try:
+    cursor.execute("ALTER TABLE gastos ADD COLUMN chat_id TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass  # A coluna já existe, ignorar o erro
 
 # Mapeamento dos meses para português
 MESES_PT = {
@@ -55,9 +64,9 @@ def extrair_gasto(texto):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "👋 **Bot de Gastos Ativo!**\n\n"
+        "👋 **Bot de Gastos Ativo neste Grupo!**\n\n"
         "• Registrar gasto: Mande mensagem com o gasto (ex: `Mercado 150.50`)\n"
-        "• `/dia` - Ver fechamento do dia de hoje\n"
+        "• `/dia` - Ver fechamento do dia de hoje no grupo\n"
         "• `/mes` - Ver gastos detalhados do mês atual por pessoa\n"
         "• `/mes MM/AAAA` - Ver gastos de um mês específico (ex: `/mes 07/2026`)\n"
         "• `/mesanterior` - Ver gastos do mês passado\n"
@@ -74,6 +83,7 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     texto = update.message.text
     user = update.effective_user
+    chat_id = str(update.effective_chat.id)
     user_id = str(user.id)
     user_name = user.first_name
 
@@ -82,9 +92,10 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         hoje = datetime.now().strftime("%Y-%m-%d")
         mes_atual = datetime.now().strftime("%Y-%m")
 
+        # Calcula o subtotal filtrando APENAS o usuário dentro DESTE grupo/chat
         cursor.execute(
-            "SELECT SUM(valor) FROM gastos WHERE user_id = ? AND data LIKE ?",
-            (user_id, f"{mes_atual}%"),
+            "SELECT SUM(valor) FROM gastos WHERE chat_id = ? AND user_id = ? AND data LIKE ?",
+            (chat_id, user_id, f"{mes_atual}%"),
         )
         subtotal_anterior = cursor.fetchone()[0] or 0.0
         subtotal_usuario_mes = subtotal_anterior + valor
@@ -99,8 +110,9 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         msg_enviada = await update.message.reply_text(resposta_texto, parse_mode="Markdown")
 
         cursor.execute(
-            "INSERT INTO gastos (user_id, user_name, descricao, valor, data, message_id) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO gastos (chat_id, user_id, user_name, descricao, valor, data, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
+                chat_id,
                 user_id,
                 user_name,
                 descricao,
@@ -114,15 +126,16 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    chat_id = str(update.effective_chat.id)
     user_id = str(user.id)
 
-    # Modo 1: Se for uma resposta (Reply) a uma mensagem do Bot ou do usuário
+    # Modo 1: Apagar por resposta (Reply) dentro do mesmo chat/grupo
     if update.message.reply_to_message:
         msg_respondida_id = update.message.reply_to_message.message_id
 
         cursor.execute(
-            "SELECT id, descricao, valor FROM gastos WHERE (message_id = ? OR message_id = ?) AND user_id = ?",
-            (msg_respondida_id, msg_respondida_id - 1, user_id),
+            "SELECT id, descricao, valor FROM gastos WHERE chat_id = ? AND (message_id = ? OR message_id = ?) AND user_id = ?",
+            (chat_id, msg_respondida_id, msg_respondida_id - 1, user_id),
         )
         gasto = cursor.fetchone()
 
@@ -135,19 +148,19 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         else:
-            await update.message.reply_text("⚠️ Não encontrei nenhum gasto associado a essa mensagem.")
+            await update.message.reply_text("⚠️ Não encontrei nenhum gasto associado a essa mensagem neste grupo.")
             return
 
-    # Modo 2: Apagar o último gasto do próprio usuário
+    # Modo 2: Apagar o último gasto do próprio usuário neste grupo
     cursor.execute(
-        "SELECT id, descricao, valor FROM gastos WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-        (user_id,),
+        "SELECT id, descricao, valor FROM gastos WHERE chat_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
+        (chat_id, user_id),
     )
     ultimo = cursor.fetchone()
 
     if not ultimo:
         await update.message.reply_text(
-            "Você não tem nenhum gasto registrado para apagar."
+            "Você não tem nenhum gasto registrado neste grupo para apagar."
         )
         return
 
@@ -161,15 +174,17 @@ async def desfazer_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
     hoje = datetime.now().strftime("%Y-%m-%d")
+    
     cursor.execute(
-        "SELECT user_name, SUM(valor) FROM gastos WHERE data = ? GROUP BY user_id",
-        (hoje,),
+        "SELECT user_name, SUM(valor) FROM gastos WHERE chat_id = ? AND data = ? GROUP BY user_id",
+        (chat_id, hoje),
     )
     resultados = cursor.fetchall()
 
     if not resultados:
-        await update.message.reply_text("Nenhum gasto registrado hoje até o momento.")
+        await update.message.reply_text("Nenhum gasto registrado neste grupo hoje até o momento.")
         return
 
     texto = f"🌙 **Fechamento do Dia ({datetime.now().strftime('%d/%m/%Y')}):**\n\n"
@@ -177,23 +192,23 @@ async def relatorio_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for nome, soma in resultados:
         texto += f"• {nome}: R$ {soma:.2f}\n"
         total_dia += soma
-    texto += f"\n💰 **Total gasto pelo casal hoje:** R$ {total_dia:.2f}"
+    texto += f"\n💰 **Total gasto no grupo hoje:** R$ {total_dia:.2f}"
 
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 
-async def gerar_relatorio_mes_detalhado(user_id_solicitante, mes_alvo, titulo_mes):
+async def gerar_relatorio_mes_detalhado(chat_id, user_id_solicitante, mes_alvo, titulo_mes):
     cursor.execute('''
         SELECT data, user_name, descricao, valor, user_id
         FROM gastos 
-        WHERE data LIKE ?
+        WHERE chat_id = ? AND data LIKE ?
         ORDER BY id ASC
-    ''', (f"{mes_alvo}%",))
+    ''', (chat_id, f"{mes_alvo}%",))
     
     resultados = cursor.fetchall()
 
     if not resultados:
-        return f"📊 Nenhum gasto registrado em **{titulo_mes}**!"
+        return f"📊 Nenhum gasto registrado neste grupo em **{titulo_mes}**!"
 
     mensagem = f"📊 **Gastos Detalhados ({titulo_mes}):**\n\n"
     totais_por_usuario = {}
@@ -216,11 +231,12 @@ async def gerar_relatorio_mes_detalhado(user_id_solicitante, mes_alvo, titulo_me
     for nome, total_user in totais_por_usuario.items():
         mensagem += f"• **{nome}**: R$ {total_user:.2f}\n"
 
-    mensagem += f"\n💰 **Total Geral:** R$ {total_geral:.2f}"
+    mensagem += f"\n💰 **Total Geral do Grupo:** R$ {total_geral:.2f}"
     return mensagem
 
 
 async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
     user_id = str(update.effective_user.id)
     
     if context.args:
@@ -238,11 +254,12 @@ async def relatorio_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mes_alvo = now.strftime('%Y-%m')
         titulo_mes = now.strftime('%m/%Y')
 
-    resposta = await gerar_relatorio_mes_detalhado(user_id, mes_alvo, titulo_mes)
+    resposta = await gerar_relatorio_mes_detalhado(chat_id, user_id, mes_alvo, titulo_mes)
     await update.message.reply_text(resposta, parse_mode='Markdown')
 
 
 async def relatorio_mes_anterior(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
     user_id = str(update.effective_user.id)
     
     hoje = datetime.now()
@@ -252,12 +269,13 @@ async def relatorio_mes_anterior(update: Update, context: ContextTypes.DEFAULT_T
     mes_alvo = ultimo_dia_mes_anterior.strftime('%Y-%m')
     titulo_mes = ultimo_dia_mes_anterior.strftime('%m/%Y')
 
-    resposta = await gerar_relatorio_mes_detalhado(user_id, mes_alvo, titulo_mes)
+    resposta = await gerar_relatorio_mes_detalhado(chat_id, user_id, mes_alvo, titulo_mes)
     await update.message.reply_text(resposta, parse_mode='Markdown')
 
 
 async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Verifica se o usuário informou um ano específico (ex: /ano 2025)
+    chat_id = str(update.effective_chat.id)
+
     if context.args:
         ano_solicitado = context.args[0]
         if not ano_solicitado.isdigit() or len(ano_solicitado) != 4:
@@ -270,15 +288,15 @@ async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute('''
         SELECT strftime('%m', data) as mes, SUM(valor)
         FROM gastos
-        WHERE data LIKE ?
+        WHERE chat_id = ? AND data LIKE ?
         GROUP BY mes
         ORDER BY mes ASC
-    ''', (f"{ano_alvo}%",))
+    ''', (chat_id, f"{ano_alvo}%",))
 
     resultados = cursor.fetchall()
 
     if not resultados:
-        await update.message.reply_text(f"📅 Nenhum gasto registrado no ano de {ano_alvo}!")
+        await update.message.reply_text(f"📅 Nenhum gasto registrado neste grupo no ano de {ano_alvo}!")
         return
 
     mensagem = f"📅 **Gastos Acumulados por Mês ({ano_alvo}):**\n\n"
@@ -289,7 +307,7 @@ async def relatorio_ano(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mensagem += f"• **{nome_mes}**: R$ {total_mes:.2f}\n"
         total_ano += total_mes
 
-    mensagem += f"\n💵 **Total Geral em {ano_alvo}:** R$ {total_ano:.2f}"
+    mensagem += f"\n💵 **Total Geral do Grupo em {ano_alvo}:** R$ {total_ano:.2f}"
 
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
